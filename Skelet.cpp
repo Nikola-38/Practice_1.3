@@ -3,6 +3,7 @@
 #include <sstream>
 #include <filesystem>
 #include "json.hpp"
+#include "rapidcsv.h"
 #include "windows.h"
 
 using namespace std;
@@ -111,66 +112,41 @@ void insert(const string& tableName, const string& values) {
 
     // Получаем путь к файлу с данными (CSV)
     string dataFile = tableName + ".csv";
-    ifstream dataIn(dataFile);
-    
-    if (!dataIn.is_open()) {
-        cerr << "Ошибка при открытии файла." << endl;
-        locker(tableName); // Разблокируем таблицу перед выходом
-        return;
+    rapidcsv::Document doc(dataFile, rapidcsv::LabelParams(0, -1)); // Читаем CSV файл
+
+    // Получаем заголовки колонок
+    vector<string> header = doc.GetColumnNames();
+    size_t lineCount = doc.GetRowCount();
+
+    // Обработка новых значений
+    vector<string> newValues;
+    stringstream ss(values);
+    string value;
+    while (getline(ss, value, ',')) {
+        newValues.push_back(value);
     }
 
-    string header;
-    getline(dataIn, header); // Читаем заголовок
-
-    // Используем массив для хранения строк (если возможно, иначе используйте список)
-    string lines[1000]; // Здесь 1000 — это максимальное количество строк
-    int lineCount = 0;
-
-    string line;
+    // Проверяем на обновление
     bool updated = false;
-    int newPrimaryKey = 0;
-
-    // Обработка каждой строки
-    while (getline(dataIn, line)) {
-        if (line.empty()) continue;
-
-        istringstream rowStream(line);
-        string key;
-        getline(rowStream, key, ','); // Извлекаем первичный ключ
-
-        // Если обновляем запись
-        if (stoi(key) == newPrimaryKey) {
-            line = to_string(newPrimaryKey) + "," + values; // Обновляем строку
+    for (size_t i = 0; i < lineCount; ++i) {
+        string key = doc.GetCell<string>(0, i); // Предположим, что первичный ключ в первой колонке
+        if (stoi(key) == lineCount + 1) { // Здесь может быть ваша логика для нового ключа
+            for (size_t j = 0; j < newValues.size(); ++j) {
+                doc.SetCell<string>(j, i, newValues[j]); // Обновляем строки
+            }
             updated = true;
+            break;
         }
-
-        lines[lineCount++] = line; // Сохраняем строку
     }
 
     // Если запись не была обновлена, создаем новую
     if (!updated) {
-        newPrimaryKey = (lineCount > 0) ? (stoi(lines[lineCount - 1].substr(0, lines[lineCount - 1].find(','))) + 1) : 1;
-        lines[lineCount++] = to_string(newPrimaryKey) + "," + values; // Добавляем новую строку
+        newValues.insert(newValues.begin(), to_string(lineCount + 1)); // Добавляем новый первичный ключ
+        doc.InsertRow(lineCount, newValues); // Вставляем новую строку
     }
 
-    // Закрываем входной файл
-    dataIn.close();
-
-    // Открываем файл для записи и записываем все строки
-    ofstream dataOut(dataFile, ios::trunc); // Открываем файл для перезаписи
-    if (!dataOut.is_open()) {
-        cerr << "Ошибка при открытии файла для записи." << endl;
-        locker(tableName); // Разблокируем таблицу перед выходом
-        return;
-    }
-
-    dataOut << header << endl; // Записываем заголовок
-    for (int i = 0; i < lineCount; ++i) {
-        dataOut << lines[i] << endl; // Записываем все строки обратно
-    }
-
-    // Закрываем выходной файл
-    dataOut.close();
+    // Сохраняем изменения обратно в файл
+    doc.Save(dataFile);
     locker(tableName); // Разблокируем таблицу
 }
 
@@ -226,6 +202,14 @@ void createScheme(const json& j) {
     }
 }
 
+#include <iostream>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+
+using namespace std;
+
 // Функция для подсчета количества CSV файлов в заданной директории
 size_t countCsv(const string& tableName) {
     size_t count = 0;
@@ -251,202 +235,198 @@ size_t findColumnIndex(const string& header, const string& columnName) {
     return (size_t)-1; // Возвращаем -1, если не найдено
 }
 
-// Функция для проверки условия
-bool evaluateCondition(const string& left, const string& op, const string& right) {
-    if (op == "=") {
-        return left == right;
-    } else if (op == ">") {
-        return stoi(left) > stoi(right);
-    } else if (op == "<") {
-        return stoi(left) < stoi(right);
-    } else if (op == "startsWith") {
-        return left.rfind(right, 0) == 0; // Проверяем, начинается ли строка
+// Функция для получения значения колонки по имени
+string getColumnValue(const string& line, const string& columnName, const string& headerLine) {
+    size_t index = findColumnIndex(headerLine, columnName);
+    if (index != (size_t)-1) {
+        stringstream lineStream(line);
+        string value;
+        for (size_t i = 0; i <= index; ++i) {
+            getline(lineStream, value, ',');
+        }
+        return value; // Возвращаем значение колонки
     }
-    return false;
+    return ""; // Если колонка не найдена
 }
 
 // Функция для проверки условия WHERE
-bool checkWhereCondition(const string& row1, const string& row2, const string& condition) {
-    istringstream conditionStream(condition);
-    string token;
+bool checkWhereCondition(const string& line1, const string& line2, const string& where, const string& headerLine1, const string& headerLine2) {
+    // Убираем лишние пробелы
+    string trimmedWhere = where;
+    trimmedWhere.erase(remove_if(trimmedWhere.begin(), trimmedWhere.end(), ::isspace), trimmedWhere.end());
 
-    while (conditionStream >> token) {
-        if (token == "AND" || token == "OR") {
-            continue; // Пропускаем оператор
-        }
+    // Поиск позиции знака равенства
+    size_t equalPos = trimmedWhere.find('=');
+    if (equalPos == string::npos) {
+        return false; // Неподдерживаемый формат условия
+    }
 
-        string left, op, right;
-        conditionStream >> left >> op >> right;
+    // Получаем левые и правые части условия
+    string leftSide = trimmedWhere.substr(0, equalPos);
+    string rightSide = trimmedWhere.substr(equalPos + 1);
 
-        size_t dotPos = left.find('.');
-        string table = left.substr(0, dotPos);
-        string column = left.substr(dotPos + 1);
+    // Убираем кавычки, если они есть
+    if (rightSide.front() == '\'' && rightSide.back() == '\'') {
+        rightSide = rightSide.substr(1, rightSide.length() - 2);
+    }
 
-        if (table == "table1") {
-            size_t colIndex = findColumnIndex(row1, column); // Предполагаем, что findColumnIndex определена
-            string value = row1.substr(colIndex, row1.find(',', colIndex) - colIndex);
-            if (!evaluateCondition(value, op, right)) {
-                return false; // Условие не выполнено
-            }
-        } else if (table == "table2") {
-            size_t colIndex = findColumnIndex(row2, column);
-            string value = row2.substr(colIndex, row2.find(',', colIndex) - colIndex);
-            if (!evaluateCondition(value, op, right)) {
-                return false; // Условие не выполнено
-            }
+    // Определяем, из какой строки мы берем значение для левой стороны
+    string table1Column, table2Column;
+    size_t dotPos = leftSide.find('.');
+    if (dotPos != string::npos) {
+        string tableName = leftSide.substr(0, dotPos);
+        string columnName = leftSide.substr(dotPos + 1);
+        if (tableName == "таблица1") {
+            table1Column = getColumnValue(line1, columnName, headerLine1);
+        } else if (tableName == "таблица2") {
+            table2Column = getColumnValue(line2, columnName, headerLine2);
         }
     }
-    return true; // Все условия выполнены
+
+    // Сравниваем значения
+    return (rightSide == table1Column || rightSide == table2Column);
 }
 
-// Функция для выполнения кросс-джойна
-void crossJoin(const string& table1, const string& column1, const string& table2, const string& column2, const string& whereCondition) {
-    size_t fileCount1 = countCsv(table1);
-    size_t fileCount2 = countCsv(table2);
-
-    if (fileCount1 == 0 || fileCount2 == 0) {
-        cout << "Ошибка: одна из таблиц не содержит CSV файлов." << endl;
-        return;
-    }
-
-    for (size_t i = 0; i < fileCount1; ++i) {
-        ifstream csvFile1(table1 + "/" + table1 + "_" + to_string(i) + ".csv");
-        if (!csvFile1.is_open()) {
-            cout << "Ошибка: не удалось открыть файл " << table1 + "_" + to_string(i) + ".csv." << endl;
-            continue;
-        }
-
-        string headerLine;
-        getline(csvFile1, headerLine);
-        string line1;
-        while (getline(csvFile1, line1)) {
-            for (size_t j = 0; j < fileCount2; ++j) {
-                ifstream csvFile2(table2 + "/" + table2 + "_" + to_string(j) + ".csv");
-                if (!csvFile2.is_open()) {
-                    cout << "Ошибка: не удалось открыть файл " << table2 + "_" + to_string(j) + ".csv." << endl;
-                    continue;
-                }
-
-                string headerLine2;
-                getline(csvFile2, headerLine2);
-                string line2;
-                while (getline(csvFile2, line2)) {
-                    // Проверяем условие WHERE
-                    if (checkWhereCondition(line1, line2, whereCondition)) {
-                        cout << line1 << ", " << line2 << endl; // Выводим значения
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Функция для вывода всех данных из таблицы
-void printAllData(const string& dataFile) {
-    ifstream csvFile(dataFile);
+// Функция для вывода всей таблицы с заголовками
+void printFullTable(const string& tableName) {
+    ifstream csvFile(tableName + ".csv");
     if (!csvFile.is_open()) {
-        cout << "Ошибка: не удалось открыть файл " << dataFile << endl;
-        return;
-    }
-
-    string line;
-    bool isEmpty = true; // Флаг для проверки пустого файла
-
-    // Выводим весь файл
-    while (getline(csvFile, line)) {
-        cout << line << endl;  // Печатаем каждую строку
-        isEmpty = false; // Если хотя бы одна строка выведена, файл не пустой
-    }
-
-    if (isEmpty) {
-        cout << "Ошибка: файл пуст." << endl; // Сообщаем о пустом файле
-    }
-
-    csvFile.close();
-}
-
-// Функция для вывода выбранных колонок
-void printSelectedColumns(const string& dataFile, const string& selectPart) {
-    ifstream csvFile(dataFile);
-    if (!csvFile.is_open()) {
-        cout << "Ошибка: не удалось открыть файл " << dataFile << endl;
+        cerr << "Ошибка: не удалось открыть файл " << tableName << ".csv." << endl;
         return;
     }
 
     string headerLine;
-    getline(csvFile, headerLine); // Читаем заголовок
+    getline(csvFile, headerLine); // Считываем заголовок
     cout << headerLine << endl; // Выводим заголовок
 
-    // Разделяем запрашиваемые колонки
-    istringstream selectStream(selectPart);
-    string column;
-    vector<string> selectedColumns;
+    string line;
+    while (getline(csvFile, line)) {
+        cout << line << endl; // Выводим строки таблицы
+    }
+}
 
-    while (getline(selectStream, column, ' ')) {
-        // Удаляем пробелы
-        column.erase(remove(column.begin(), column.end(), ' '), column.end());
-        if (!column.empty()) {
-            selectedColumns.push_back(column);
-        }
+// Функция для вывода таблицы по заданным названиям колонок
+void printColumns(const string& tableName, const vector<string>& columnNames) {
+    ifstream csvFile(tableName + ".csv");
+    if (!csvFile.is_open()) {
+        cerr << "Ошибка: не удалось открыть файл " << tableName << ".csv." << endl;
+        return;
     }
 
+    string headerLine;
+    getline(csvFile, headerLine); // Считываем заголовок
+
+    // Получаем индексы колонок
+    vector<size_t> columnIndices;
+    istringstream headerStream(headerLine);
+    string column;
+    size_t index = 0;
+
+    while (getline(headerStream, column, ',')) {
+        for (const string& colName : columnNames) {
+            if (column == colName) {
+                columnIndices.push_back(index);
+                break;
+            }
+        }
+        index++;
+    }
+
+    // Выводим заголовки выбранных колонок
+    for (size_t i = 0; i < columnIndices.size(); ++i) {
+        cout << (i > 0 ? "," : "") << columnNames[i];
+    }
+    cout << endl;
+
+    // Выводим данные из выбранных колонок
     string line;
-    // Выводим только выбранные колонки
     while (getline(csvFile, line)) {
         istringstream lineStream(line);
         string value;
-        for (const string& col : selectedColumns) {
-            size_t colIndex = findColumnIndex(headerLine, col); // Находим индекс колонки
-
-            if (colIndex != string::npos) {
-                // Пропускаем значения до индекса colIndex
-                size_t currentIndex = 0;
-                istringstream lineStreamCopy(line);
-                while (getline(lineStreamCopy, value, ',')) {
-                    if (currentIndex == colIndex) {
-                        cout << value << " "; // Выводим только выбранные колонки
-                        break; // Выходим из внутреннего цикла
-                    }
-                    currentIndex++;
-                }
+        for (size_t i = 0; i < columnIndices.size(); ++i) {
+            for (size_t j = 0; j <= columnIndices[i]; ++j) {
+                getline(lineStream, value, ',');
             }
+            cout << (i > 0 ? "," : "") << value;
         }
-        cout << endl; // Переход на новую строку
+        cout << endl;
     }
-
-    csvFile.close();
 }
 
-// Основная функция
-void select(const string& command) {
-    // Находим позицию FROM
-    size_t fromPos = command.find("FROM");
-    if (fromPos == string::npos) {
-        cout << "Ошибка: не указано 'FROM'." << endl;
+// Модифицируем функцию select
+void select(const string& query) {
+    string table1, table2;
+    string whereToken;
+    bool isTwoTables = false;
+
+    stringstream ss(query);
+    string temp;
+    ss >> temp; // Пропускаем "SELECT"
+    ss >> temp; // Пропускаем "FROM"
+    getline(ss, temp); // Получаем оставшуюся часть команды
+
+    size_t wherePos = temp.length();
+    for (size_t i = 0; i < temp.length(); ++i) {
+        if (temp[i] == 'W' && temp.substr(i, 5) == "WHERE") {
+            wherePos = i;
+            break;
+        }
+    }
+
+    if (wherePos < temp.length()) {
+        whereToken = temp.substr(wherePos + 6);
+        temp = temp.substr(0, wherePos);
+    }
+
+    size_t commaPos = temp.length();
+    for (size_t i = 0; i < temp.length(); ++i) {
+        if (temp[i] == ',') {
+            commaPos = i;
+            isTwoTables = true;
+            break;
+        }
+    }
+
+    if (isTwoTables) {
+        table1 = temp.substr(0, commaPos);
+        table2 = temp.substr(commaPos + 1);
+    } else {
+        table1 = temp;
+    }
+
+    // Убираем лишние пробелы
+    while (table1.length() > 0 && table1[0] == ' ') {
+        table1 = table1.substr(1);
+    }
+
+    if (isTwoTables) {
+        while (table2.length() > 0 && table2[0] == ' ') {
+            table2 = table2.substr(1);
+        }
+    }
+
+    // Проверяем наличие первой таблицы
+    if (!fs::exists(table1 + ".csv")) {
+        cerr << "Ошибка: таблица " << table1 << " не существует." << endl;
         return;
     }
 
-    // Извлекаем часть SELECT
-    string selectPart = command.substr(6, fromPos - 6);
-    string fromPart = command.substr(fromPos + 5);
-
-    // Извлекаем имя таблицы
-    string tableName;
-    istringstream fromStream(fromPart);
-    fromStream >> tableName; // Получаем имя первой таблицы
-
-    // Если selectPart пустой, выводим всю таблицу
-    if (selectPart.empty()) {
-        cout << "Вывод данных из таблицы " << tableName << ":" << endl;
-        string dataFile = tableName + ".csv";
-        printAllData(dataFile);  // Вывод всей таблицы
-        return;
+    // Вывод всей таблицы, если нет указанных колонок
+    if (!whereToken.empty()) {
+        // Ваша логика выборки по условиям
+    } else {
+        printFullTable(table1); // Если нет условий, выводим всю таблицу
     }
 
-    cout << "Вывод данных из таблицы " << tableName << ":" << endl;
-    printSelectedColumns(tableName + ".csv", selectPart); // Вызываем для выбора колонок
+    // Если есть вторая таблица
+    if (isTwoTables) {
+        if (!fs::exists(table2 + ".csv")) {
+            cerr << "Ошибка: таблица " << table2 << " не существует." << endl;
+            return;
+        }
+        printFullTable(table2); // Выводим всю вторую таблицу
+    }
 }
-
 
 // Основная функция
 int main() {
