@@ -355,78 +355,101 @@ void printColumns(const string& tableName, const vector<string>& columnNames) {
 
 // Модифицируем функцию select
 void select(const string& query) {
-    string table1, table2;
+    string tableName;
+    string columns;
     string whereToken;
-    bool isTwoTables = false;
 
     stringstream ss(query);
     string temp;
     ss >> temp; // Пропускаем "SELECT"
-    ss >> temp; // Пропускаем "FROM"
-    getline(ss, temp); // Получаем оставшуюся часть команды
 
-    size_t wherePos = temp.length();
-    for (size_t i = 0; i < temp.length(); ++i) {
-        if (temp[i] == 'W' && temp.substr(i, 5) == "WHERE") {
+    // Считываем все столбцы до "FROM"
+    getline(ss, columns, 'F'); // Читаем до "FROM"
+    ss >> temp; // Пропускаем "FROM"
+    ss >> tableName; // Читаем имя таблицы
+
+    // Проверяем наличие WHERE
+    size_t wherePos = string::npos;
+    for (size_t i = 0; i < query.size() - 5; ++i) {
+        if (query.substr(i, 5) == "WHERE") {
             wherePos = i;
             break;
         }
     }
 
-    if (wherePos < temp.length()) {
-        whereToken = temp.substr(wherePos + 6);
-        temp = temp.substr(0, wherePos);
+    if (wherePos != string::npos) {
+        whereToken = query.substr(wherePos + 6); // Получаем часть после WHERE
     }
 
-    size_t commaPos = temp.length();
-    for (size_t i = 0; i < temp.length(); ++i) {
-        if (temp[i] == ',') {
-            commaPos = i;
-            isTwoTables = true;
-            break;
-        }
+    // Убираем лишние пробелы для имени таблицы
+    while (!tableName.empty() && tableName[0] == ' ') {
+        tableName = tableName.substr(1);
+    }
+    while (!tableName.empty() && tableName[tableName.size() - 1] == ' ') {
+        tableName = tableName.substr(0, tableName.size() - 1);
     }
 
-    if (isTwoTables) {
-        table1 = temp.substr(0, commaPos);
-        table2 = temp.substr(commaPos + 1);
-    } else {
-        table1 = temp;
+    // Убираем лишние пробелы для столбцов
+    while (!columns.empty() && columns[0] == ' ') {
+        columns = columns.substr(1);
+    }
+    while (!columns.empty() && columns[columns.size() - 1] == ' ') {
+        columns = columns.substr(0, columns.size() - 1);
     }
 
-    // Убираем лишние пробелы
-    while (table1.length() > 0 && table1[0] == ' ') {
-        table1 = table1.substr(1);
-    }
-
-    if (isTwoTables) {
-        while (table2.length() > 0 && table2[0] == ' ') {
-            table2 = table2.substr(1);
-        }
-    }
-
-    // Проверяем наличие первой таблицы
-    if (!fs::exists(table1 + ".csv")) {
-        cerr << "Ошибка: таблица " << table1 << " не существует." << endl;
+    // Проверяем наличие таблицы
+    if (!fs::exists(tableName + ".csv")) {
+        cerr << "Ошибка: таблица " << tableName << " не существует." << endl;
         return;
     }
 
-    // Вывод всей таблицы, если нет указанных колонок
-    if (!whereToken.empty()) {
-        // Ваша логика выборки по условиям
-    } else {
-        printFullTable(table1); // Если нет условий, выводим всю таблицу
+    // Разбиваем названия столбцов на вектор
+    vector<string> columnNames;
+    string col;
+    size_t start = 0;
+    size_t commaPos;
+
+    while (true) {
+        commaPos = columns.find(',');
+
+        if (commaPos != string::npos) {
+            col = columns.substr(0, commaPos);
+            columns = columns.substr(commaPos + 1);
+        } else {
+            col = columns; // Оставшаяся часть
+            columns.clear();
+        }
+
+        // Убираем пробелы из названия столбца
+        while (!col.empty() && col[0] == ' ') {
+            col = col.substr(1);
+        }
+        while (!col.empty() && col[col.size() - 1] == ' ') {
+            col = col.substr(0, col.size() - 1);
+        }
+
+        if (!col.empty()) {
+            columnNames.push_back(col);
+        }
+
+        if (columns.empty()) {
+            break; // Завершаем, если больше нет колонок
+        }
     }
 
-    // Если есть вторая таблица
-    if (isTwoTables) {
-        if (!fs::exists(table2 + ".csv")) {
-            cerr << "Ошибка: таблица " << table2 << " не существует." << endl;
-            return;
-        }
-        printFullTable(table2); // Выводим всю вторую таблицу
+    // Проверяем, есть ли указанные столбцы
+    if (!columnNames.empty()) {
+        printColumns(tableName, columnNames);
+    } else {
+        printFullTable(tableName);
+    }
+
+    // Если указаны условия WHERE, добавьте сюда логику фильтрации
+    if (!whereToken.empty()) {
+        // Логика обработки условий WHERE
     }
 }
+
 
 // Основная функция
 int main() {
