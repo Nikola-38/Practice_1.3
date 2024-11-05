@@ -10,6 +10,18 @@ using namespace std;
 using json = nlohmann::json;
 namespace fs = filesystem;
 
+// Определяем структуру для хранения названий колонок
+struct Column {
+    string colom; // Название колонки
+    Column* next; // Указатель на следующую колонку
+};
+
+// Определяем структуру для хранения индексов выбранных колонок
+struct IndexNode {
+    size_t index; // Индекс колонки
+    IndexNode* next; // Указатель на следующий индекс
+};
+
 struct TableJson {
     string schemeName;   // Имя схемы
     size_t tuplesLimit;  // Ограничение на количество кортежей
@@ -34,13 +46,6 @@ void loadJson(const string& filename, json& j) {
     j = json::parse(ss.str(), nullptr, false);
     if (j.is_discarded()) {
         throw runtime_error("JSON parsing error.");
-    }
-}
-
-// Функция для удаления директории и её содержимого
-void removeDirectory(const fs::path& dirPath) {
-    if (fs::exists(dirPath)) {
-        fs::remove_all(dirPath);
     }
 }
 
@@ -202,13 +207,6 @@ void createScheme(const json& j) {
     }
 }
 
-#include <iostream>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <string>
-
-using namespace std;
 
 // Функция для подсчета количества CSV файлов в заданной директории
 size_t countCsv(const string& tableName) {
@@ -306,7 +304,7 @@ void printFullTable(const string& tableName) {
 }
 
 // Функция для вывода таблицы по заданным названиям колонок
-void printColumns(const string& tableName, const vector<string>& columnNames) {
+void printColumns(const string& tableName, Column* columnNames) {
     ifstream csvFile(tableName + ".csv");
     if (!csvFile.is_open()) {
         cerr << "Ошибка: не удалось открыть файл " << tableName << ".csv." << endl;
@@ -316,42 +314,91 @@ void printColumns(const string& tableName, const vector<string>& columnNames) {
     string headerLine;
     getline(csvFile, headerLine); // Считываем заголовок
 
-    // Получаем индексы колонок
-    vector<size_t> columnIndices;
+    // Определяем индексы выбранных колонок
+    IndexNode* selectedIndexes = nullptr;
+    IndexNode* lastIndex = nullptr;
     istringstream headerStream(headerLine);
     string column;
     size_t index = 0;
 
+    // Находим индексы колонок для вывода
     while (getline(headerStream, column, ',')) {
-        for (const string& colName : columnNames) {
-            if (column == colName) {
-                columnIndices.push_back(index);
-                break;
+        for (Column* col = columnNames; col != nullptr; col = col->next) {
+            if (column == col->colom) {
+                IndexNode* newIndex = new IndexNode{index, nullptr};
+                if (selectedIndexes == nullptr) {
+                    selectedIndexes = newIndex; // Если это первая колонка
+                } else {
+                    lastIndex->next = newIndex; // Присоединяем новую колонку
+                }
+                lastIndex = newIndex; // Обновляем указатель на последний индекс
+                break; // Выход из внутреннего цикла
             }
         }
         index++;
     }
 
     // Выводим заголовки выбранных колонок
-    for (size_t i = 0; i < columnIndices.size(); ++i) {
-        cout << (i > 0 ? "," : "") << columnNames[i];
+    for (IndexNode* idx = selectedIndexes; idx != nullptr; idx = idx->next) {
+        istringstream headerStream(headerLine);
+        string headerColumn;
+        size_t currentIndex = 0;
+
+        while (getline(headerStream, headerColumn, ',')) {
+            if (currentIndex == idx->index) {
+                cout << (idx == selectedIndexes ? "" : ",") << headerColumn;
+                break;
+            }
+            currentIndex++;
+        }
     }
     cout << endl;
+
+    // Перематываем файл к началу для считывания данных
+    csvFile.clear();
+    csvFile.seekg(0);
+    getline(csvFile, headerLine); // Пропускаем заголовок
 
     // Выводим данные из выбранных колонок
     string line;
     while (getline(csvFile, line)) {
         istringstream lineStream(line);
         string value;
-        for (size_t i = 0; i < columnIndices.size(); ++i) {
-            for (size_t j = 0; j <= columnIndices[i]; ++j) {
+        index = 0;
+        bool firstValue = true;
+
+        for (IndexNode* idx = selectedIndexes; idx != nullptr; idx = idx->next) {
+            // Пропускаем ненужные колонки
+            while (index < idx->index) {
                 getline(lineStream, value, ',');
+                index++;
             }
-            cout << (i > 0 ? "," : "") << value;
+
+            getline(lineStream, value, ','); // Считываем значение нужной колонки
+
+            // Убираем кавычки и пробелы
+            if (!value.empty()) {
+                if (value.front() == '\"' && value.back() == '\"') {
+                    value = value.substr(1, value.size() - 2);
+                }
+                value.erase(remove(value.begin(), value.end(), ' '), value.end());
+            }
+
+            // Выводим значение колонки
+            cout << (firstValue ? "" : ",") << value;
+            firstValue = false; // Обозначаем, что это не первое значение
         }
-        cout << endl;
+        cout << endl; // Переход на новую строку после каждой записи
+    }
+
+    // Освобождаем память
+    while (selectedIndexes != nullptr) {
+        IndexNode* temp = selectedIndexes;
+        selectedIndexes = selectedIndexes->next;
+        delete temp;
     }
 }
+
 
 // Модифицируем функцию select
 void select(const string& query) {
@@ -389,7 +436,7 @@ void select(const string& query) {
         tableName = tableName.substr(0, tableName.size() - 1);
     }
 
-    // Убираем лишние пробелы для столбцов
+    // Убираем лишние пробелы для колонок
     while (!columns.empty() && columns[0] == ' ') {
         columns = columns.substr(1);
     }
@@ -403,23 +450,13 @@ void select(const string& query) {
         return;
     }
 
-    // Разбиваем названия столбцов на вектор
-    vector<string> columnNames;
+    // Разбиваем названия колонок на связный список
+    Column* columnNames = nullptr;
+    Column* lastColumn = nullptr;
+
     string col;
-    size_t start = 0;
-    size_t commaPos;
-
-    while (true) {
-        commaPos = columns.find(',');
-
-        if (commaPos != string::npos) {
-            col = columns.substr(0, commaPos);
-            columns = columns.substr(commaPos + 1);
-        } else {
-            col = columns; // Оставшаяся часть
-            columns.clear();
-        }
-
+    stringstream colStream(columns);
+    while (colStream >> col) { // Читаем колонки, разделенные пробелами
         // Убираем пробелы из названия столбца
         while (!col.empty() && col[0] == ' ') {
             col = col.substr(1);
@@ -429,16 +466,18 @@ void select(const string& query) {
         }
 
         if (!col.empty()) {
-            columnNames.push_back(col);
-        }
-
-        if (columns.empty()) {
-            break; // Завершаем, если больше нет колонок
+            Column* newColumn = new Column{col, nullptr};
+            if (columnNames == nullptr) {
+                columnNames = newColumn; // Если это первая колонка
+            } else {
+                lastColumn->next = newColumn; // Присоединяем новую колонку
+            }
+            lastColumn = newColumn; // Обновляем указатель на последнюю колонку
         }
     }
 
     // Проверяем, есть ли указанные столбцы
-    if (!columnNames.empty()) {
+    if (columnNames != nullptr) {
         printColumns(tableName, columnNames);
     } else {
         printFullTable(tableName);
@@ -448,8 +487,14 @@ void select(const string& query) {
     if (!whereToken.empty()) {
         // Логика обработки условий WHERE
     }
-}
 
+    // Освобождаем память
+    while (columnNames != nullptr) {
+        Column* temp = columnNames;
+        columnNames = columnNames->next;
+        delete temp;
+    }
+}
 
 // Основная функция
 int main() {
