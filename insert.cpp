@@ -1,201 +1,228 @@
 #include "insert.h"
 
-bool TableExist(const string& tableName, Node* tableHead) { // проверка: существует ли таблица
-    Node* current = tableHead; // указатель на голову списка таблиц
+bool TableExist(const string& tableName, Node* tableHead) {
+    Node* current = tableHead;
     while (current) {
         if (current->table == tableName) {
-            return true; // таблица с указанным именем существует
+            return true;
         }
         current = current->next;
     }
-    return false; // такой таблицы нет
+    return false;
 }
 
 bool isloker(const string& tableName, const string& schemeName) {
-    // Формируем путь к файлу блокировки таблицы
-    fs::path baseDir = fs::path(":/mnt/c/Users/Николай/practice 2/Practice 1.3") / schemeName / tableName;
-    fs::path lockFile = baseDir / (tableName + "_lock.txt");
+    string baseDir = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + schemeName + "/" + tableName;
+    string lockFile = baseDir + "/" + (tableName + "_lock.txt");
 
-    // Открываем файл
+    if (!fs::exists(lockFile)) {
+        cerr << "Ошибка: файл блокировки не существует: " << lockFile << ".\n";
+        return false;
+    }
+
     ifstream file(lockFile);
     if (!file.is_open()) {
-        сerr << "Ошибка: не удалось открыть файл " << lockFile << ".\n";
+        cerr << "Ошибка: не удалось открыть файл блокировки: " << lockFile << ".\n";
+        return false;
     }
 
     string current;
     file >> current;
     file.close();
-    if (current == "locked") {
-        return true; // заблокирована
-    }
-    return false; // разблокирована
+    return current == "locked";
 }
 
-void copyNameColonk(const string& from_file, const string& to_file) { // копирование названия колонок
-    string columns; // строка для колонок
+void loker(const string& tableName, const string& schemeName) {
+    string baseDir = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + schemeName + "/" + tableName;
+    string lockFile = baseDir + "/" + (tableName + "_lock.txt");
+
+    if (!fs::exists(lockFile)) {
+        cerr << "Ошибка: файл блокировки не существует: " << lockFile << "\n";
+        return;
+    }
+
+    ifstream fileIn(lockFile);
+    if (!fileIn.is_open()) {
+        cerr << "Не удалось открыть файл блокировки: " << lockFile << "\n";
+        return;
+    }
+
+    string current;
+    fileIn >> current;
+    fileIn.close();
+
+    ofstream fileOut(lockFile);
+    if (!fileOut.is_open()) {
+        cerr << "Не удалось открыть файл для записи блокировки: " << lockFile << "\n";
+        return;
+    }
+
+    fileOut << (current == "locked" ? "unlocked" : "locked");
+    fileOut.close();
+}
+
+// Функция для копирования названий колонок из одного файла в другой
+void copyNameColonk(const string& from_file, const string& to_file) {
+    string columns;
     ifstream fileF(from_file); // открываем файл для чтения колонок
     if (!fileF.is_open()) {
-        cerr << "Не удалось открыть файл.\n";
+        cerr << "Не удалось открыть файл: " << from_file << "\n";
         return;
     }
     fileF >> columns;
     fileF.close();
+
     ofstream fileT(to_file); // открываем файл для записи колонок
     if (!fileT.is_open()) {
-        cerr << "Не удалось открыть файл.\n";
+        cerr << "Не удалось открыть файл: " << to_file << "\n";
         return;
     }
     fileT << columns << endl;
     fileT.close();
 }
 
-void loker(const string& tableName, const string& schemeName) {
-    // Получаем базовый путь с использованием std::filesystem
-    fs::path baseDir = fs::path(":/mnt/c/Users/Николай/practice 2/Practice 1.3") / schemeName / tableName;
-    fs::path lockFile = baseDir / (tableName + "_lock.txt");
+int findCsvFileCount(const TableJson& json_table, const string& tableName) {
+    int csvCount = 0;
+    int csvNumber = 1;
 
-    // Проверяем, существует ли файл блокировки
-    if (!fs::exists(lockFile)) {
-        cerr << "Ошибка: файл не существует: " << lockFile << "\n";
-        return;
+    while (true) {
+        string csvFile = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + json_table.Name + "/" + tableName + "/" + (to_string(csvNumber) + ".csv");
+
+        // Проверяем, существует ли файл
+        ifstream fileIn(csvFile);
+        if (!fileIn.is_open()) {
+            // Файл не существует, выходим из цикла, так как дальше файлов нет
+            break;
+        }
+        fileIn.close();  // Закрываем файл после проверки
+
+        // Увеличиваем счётчик найденных файлов
+        csvCount++;
+        
+        // Переходим к следующему файлу
+        csvNumber++;
     }
 
-    ifstream fileIn(lockFile);
-    if (!fileIn.is_open()) {
-        std::cerr << "Не удалось открыть файл: " << lockFile << "\n";
-        return;
-    }
-
-    string current;
-    // Чтение текущего значения блокировки
-    fileIn >> current;
-    fileIn.close();
-
-    ofstream fileOut(lockFile); // перезаписываем файл
-    if (!fileOut.is_open()) {
-        cerr << "Не удалось открыть файл для записи: " << lockFile << "\n";
-        return;
-    }
-
-    if (current == "locked") {
-        fileOut << "unlocked"; // если таблица заблокирована, меняем на разблокирована
-    } else {
-        fileOut << "locked"; // если была разблокирована, становится заблокирована
-    }
-    fileOut.close();
+    // Возвращаем общее количество существующих файлов
+    return csvCount;
 }
 
-void insert(const string& command, TableJson json_table){
-    instrinstream iss(command);
-    string slovo;
-    iss >> slovo;
-    iss >> slovo;
-
-    if (word != "INTO") {
-    cerr << "Некорректная команда.\n";
-    return;
+void createNewCsvFile(const string& baseDir, const string& tableName, int& csvNumber, const TableJson& tableJson) {
+    // Получаем максимальное количество строк на файл из структуры TableJson
+    int maxRowsPerFile = tableJson.TableSize;
+    
+    // Формируем путь к текущему CSV файлу
+    string csvFile = baseDir + "/" + tableName + "/" + to_string(csvNumber) + ".csv";
+    
+    // Проверяем количество строк в текущем файле
+    rapidcsv::Document doc(csvFile);
+    if (doc.GetRowCount() >= maxRowsPerFile) {
+        // Если достигнут лимит строк, увеличиваем номер файла
+        csvNumber++;
+        csvFile = baseDir + "/" + tableName + "/" + to_string(csvNumber) + ".csv";
     }
 
-    string tableName; // имя таблицы из команды
-    iss >> word; // название таблицы
-    if (TableExist(slovo, json_table.tablehead) == false) {
+    // Если файла нет, создаём его
+    if (!fs::exists(csvFile)) {
+        // Создаём новый файл и копируем в него названия колонок
+        string csvFirst = baseDir + "/" + tableName + "/1.csv";
+        copyNameColonk(csvFirst, csvFile);
+    }
+}
+
+void insert(const string& command, TableJson json_table) {
+    istringstream iss(command);
+    string slovo;
+    iss >> slovo >> slovo;
+
+    if (slovo != "INTO") {
+        cerr << "Некорректная команда.\n";
+        return;
+    }
+
+    string tableName;
+    iss >> tableName;
+    if (!TableExist(tableName, json_table.Tablehead)) {
         cerr << "Такой таблицы нет.\n";
         return;
     }
 
-    tableName = slovo;
-    iss >> slovo; // "VALUES"
+    iss >> slovo;
     if (slovo != "VALUES") {
         cerr << "Некорректная команда.\n";
         return;
     }
 
-    string values; // строка для вытаскивания значений вставки
+    string values;
     while (iss >> slovo) {
         values += slovo;
     }
+
     if (values.front() != '(' || values.back() != ')') {
         cerr << "Некорректная команда.\n";
         return;
     }
 
-    if (isloker(tableName,json_table.schemeName) == true) { // проверяем, доступна ли таблица для работы
-    cerr << "Таблица заблокирована.\n";
-    return;
+    if (isloker(tableName, json_table.Name)) {
+        cerr << "Таблица заблокирована.\n";
+        return;
     }
 
-    locker(tableName, json_table.schemeName); // блокируем таблицу для вставки
-    int currentPK; // текущий первичный ключ
-    fs::path PKFile = fs::path(":/mnt/c/Users/Николай/practice 2/Practice 1.3") / json_table.schemeName / tableName / (tableName + "_pk_sequence.txt");
+    loker(tableName, json_table.Name);
+
+    int currentPK;
+    string PKFile = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + json_table.Name + "/" + tableName + "/" + (tableName + "_pk_sequence.txt");
     ifstream fileIn(PKFile);
     if (!fileIn.is_open()) {
         cerr << "Не удалось открыть файл.\n";
         return;
     }
 
-    fileIn >> currentPK; // считываем ключ в переменную
+    fileIn >> currentPK;
     fileIn.close();
+
     ofstream fileOut(PKFile);
     if (!fileOut.is_open()) {
         cerr << "Не удалось открыть файл.\n";
         return;
     }
     currentPK++;
-    fileOut << currentPK; // увеличиваем на 1 и записываем новый ключ в файл
+    fileOut << currentPK;
     fileOut.close();
 
-    int csvNumber = 1; // номер файла csv
-    while (true) {
-        fs::path csvFile = fs::path(":/mnt/c/Users/Николай/practice 2/Practice 1.3") / json_table.schemeName /  tableName / (to_string(csvNumber) + ".csv");
-        ifstream fileIn(csvFile); // открываем csv файл
-        if (!fileIn.is_open()) {
-            ofstream fileOut(csvFile); // если такого файла нет, создаём новый
-            if (!fileOut.is_open()) {
-                cerr << "Не удалось открыть файл.\n";
-                return;
-            }
-            fileOut.close();
-        }
-        else {
-            fileIn.close();
-        }
+    // Логика для определения количества существующих файлов
+    int csvNumber = findCsvFileCount(json_table, tableName);
 
-        rapidcsv::Document doc(csvFile); // считываем csv в doc
-        if (doc.GetRowCount() < json_table.tableSize) { // если количество строк не превышает лимит
-            break; // завершаем цикл
-        }
-        csvNumber++; // иначе продолжаем искать пустые файлы
-    }
+    string baseDir = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + json_table.Name;
 
-    fs::path csvFirst = fs::path (":/mnt/c/Users/Николай/practice 2/Practice 1.3") / json_table.schemeName / (tableName + "/1.csv");
-    fs::path csvSecond = fs::path (":/mnt/c/Users/Николай/practice 2/Practice 1.3") / json_table.schemeName / tableName / (to_string(csvNumber) + ".csv");
-    rapidcsv::Document doc_(csvSecond); // считываем содержимое файла с помощью rapid
-    if (doc_.GetRowCount() == 0 && doc_.GetColumnCount() == 0) { // если текущий файл пуст
-        copyColumnsName(csvFirst, csvSecond); // записываем в него названия колонок
-    }
+    // Используем новую функцию для создания нового CSV файла, если нужно
+    createNewCsvFile(baseDir, tableName, csvNumber, json_table);
 
-     ofstream csv(csvSecond, ios::app);
+    string csvSecond = baseDir + "/" + tableName + "/" + to_string(csvNumber) + ".csv";
+
+    // Открываем CSV файл для записи
+    ofstream csv(csvSecond, ios::app);
     if (!csv.is_open()) {
         cerr << "Не удалось открыть файл.\n";
         return;
     }
 
-    csv << currentPK << ","; // записываем текущий первичный ключ
+    // Записываем данные в CSV файл
+    csv << currentPK << ",";
     for (int i = 0; i < values.size(); i++) {
-    if (values[i] == '\'') {  // если встречаем одиночную кавычку
-        i++; 
-        while (i < values.size() && values[i] != '\'') {
-            csv << values[i]; 
+        if (values[i] == '\'') {
             i++;
-        }
-        // Проверяем, что за кавычкой не сразу идет ')', чтобы правильно разделить значения
-        if (i + 1 < values.size() && values[i + 1] != ')') {
-            csv << ",";  // если это не последнее значение, ставим запятую
-        } else {
-            csv << endl;  
+            while (i < values.size() && values[i] != '\'') {
+                csv << values[i++];
             }
+            if (i + 1 < values.size() && values[i + 1] != ')') {
+                csv << ",";
+            } else {
+                csv << endl;
+            }
+        }
     }
-    }
+
     csv.close();
-    locker(tableName, json_table.schemeName); // разблокировка
+    loker(tableName, json_table.Name);
 }
