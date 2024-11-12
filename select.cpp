@@ -46,8 +46,6 @@ void separationDot(const string& word, string& table, string& column, const Tabl
         return;
     }
 
-    // Вывод для отладки
-    cerr << "Таблица: " << table << ", Колонка: " << column << endl;
 }
 
 
@@ -78,7 +76,6 @@ bool findDot(const string& indication) {
 bool processConditionString(const TableJson& json_table, const string& table, const string& column, const string& s) {
    if (!s.empty()){
     int cntCsv = findCsvFileCount(json_table, table);
-    cout << "Колво таблиц " << cntCsv << endl;
         for (size_t i = 1; i <= cntCsv; i++) { // просматриваем все созданные файлы csv
             string filePath = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + json_table.Name + "/" + table + "/" + to_string(i) + ".csv";
             rapidcsv::Document doc(filePath); // открываем файл
@@ -86,9 +83,13 @@ bool processConditionString(const TableJson& json_table, const string& table, co
             size_t cntRow = doc.GetRowCount(); // считываем количество строк в файле
             for (size_t i = 0; i < cntRow; ++i) {
                 string cellValue = doc.GetCell<string>(columnIndex, i);
-                cout << cellValue << " == "<< s << endl;
                 if (cellValue == s) {
+                    cout << "Сравнение с значением"<<endl;
+                    cout << "Таблица "<<table<<"(" << column << "): " <<cellValue << " = "<< s << endl;
                     return true;
+                }
+                else{
+                    cerr << "Нет такого значения в таблице";
                 }
             }
         }
@@ -101,31 +102,30 @@ bool processConditionTable(const TableJson& json_table, const string& table1, co
         int cntCsv1 = findCsvFileCount(json_table, table1);
         int cntCsv2 = findCsvFileCount(json_table, table2);
 
-        cout << "TABLES cnt: " << cntCsv1 << ", "<< cntCsv2 << endl;
-
         for (size_t iCsv = 1; iCsv <= cntCsv1; iCsv++) {
-            string filePath1 = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + json_table.Name + "/" + table1 + "/" + to_string(iCsv) + ".csv";
-            rapidcsv::Document doc1(filePath1); // открываем файл
-            int columnIndex1 = doc1.GetColumnIdx(column1); // считываем индекс искомой колонки
-            size_t cntRow1 = doc1.GetRowCount(); // считываем количество строк в файле
             for (size_t icsv = 1; icsv <= cntCsv2; icsv++){
+                string filePath1 = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + json_table.Name + "/" + table1 + "/" + to_string(iCsv) + ".csv";
+                rapidcsv::Document doc1(filePath1); // открываем файл
+                int columnIndex1 = doc1.GetColumnIdx(column1); // считываем индекс искомой колонки
+                size_t cntRow1 = doc1.GetRowCount(); // считываем количество строк в файле
+
                 string filePath2 = "/mnt/c/Users/Николай/practice 2/Practice 1.3/" + json_table.Name + "/" + table2 + "/" + to_string(icsv) + ".csv";
                 rapidcsv::Document doc2(filePath2); // открываем файл
                 size_t cntRow2 = doc2.GetRowCount(); // считываем количество строк в файле
                 int columnIndex2 = doc2.GetColumnIdx(column2); // считываем индекс искомой колонки
-
-                cout << "CNT column: " << cntRow1 << ", " << cntRow2 << endl;
                 if(cntRow1 == cntRow2){
                     for (size_t i = 0; i < cntRow1; ++i) { // проходимся по строкам
                     string value1 = doc1.GetCell<string>(columnIndex1, i);
                     string value2 = doc2.GetCell<string>(columnIndex2, i);
-                    cout <<"Tables " << value1 << " == "<< value2<< endl;
                     // Сравниваем значения колонок
                     if (value1 != value2) {
                         condition = false;
+                        cerr << " Значения в таблицах не равны";
                     }
                     if(value1 == value2){
-                        condition = true;  
+                        condition = true;
+                        cout << "Сравнение таблиц"<<endl;
+                        cout << "Таблица1 (" << column1 << "): " << value1 << " | Таблица2 (" << column2 << "): " << value2 << endl;  
                     }
                 }
             } else {
@@ -139,7 +139,7 @@ bool processConditionTable(const TableJson& json_table, const string& table1, co
 }
 
 
-// Функция для выполнения кросс-соединения и фильтрации с учетом условия WHERE
+// Функция для выполнения кросс-соединения
 void crossJoinAndFilter(const TableJson& json_table, const string& table1, const string& table2, const string& column1, const string& column2) {
     int csvCNT1 = findCsvFileCount(json_table, table1); 
     int csvCNT2 = findCsvFileCount(json_table, table2); 
@@ -190,14 +190,7 @@ void crossJoinAndFilter(const TableJson& json_table, const string& table1, const
     }
 }
 
-void printColumns(const string& table, const string& column) {
-    cout << "Колонка " << column << " из таблицы " << table << ":\n";
-    // Допустим, выводим содержимое колонки из таблицы
-    // Здесь вы должны реализовать логику для вывода данных из конкретной таблицы
-}
 
-
-// Функция для выполнения SQL-подобного запроса SELECT
 void select(const string& query, const TableJson& json_table) {
     istringstream iss(query);
     string slovo;
@@ -268,7 +261,6 @@ void select(const string& query, const TableJson& json_table) {
     // Далее проверка на AND / OR
     string oper;
     if (iss >> oper && (oper == "AND" || oper == "OR")) {
-        cout << "Оператор: " << oper << endl;
 
         string conditionValue2;
         iss >> slovo; // STUDENT.CURS (или другая колонка)
@@ -283,22 +275,16 @@ void select(const string& query, const TableJson& json_table) {
         string cleanedconditionValue2 = ignoreQuotes(conditionValue2);
         secondCondition = processConditionString(json_table, t3, c3, cleanedconditionValue2);
 
-        cout << cleanedconditionValue2 << " " << t3<< " " << c3 << endl;
-
         // Логика для оператора AND
         if (oper == "AND" && (firstCondition && secondCondition)) {
-            cout << "Условия выполняются с оператором AND.\n";
-            printColumns(table1, column1);
-            printColumns(table2, column2);
+            crossJoinAndFilter(json_table, table1, table2, column1, column2);
         }
         // Логика для оператора OR
         else if (oper == "OR" && (firstCondition || secondCondition)) {
-            cout << "Условия выполняются с оператором OR.\n";
-            printColumns(table1, column1);
-            printColumns(table2, column2);
+            crossJoinAndFilter(json_table, table1, table2, column1, column2);
         }
         else{
-            cerr << "Первый: "<< firstCondition <<" Второй: "<< secondCondition << endl;
+            cerr << "Условия не выполняются" << endl;
         }
     }
 }
